@@ -1,0 +1,50 @@
+{
+  "level": 1,
+  "car": {
+    "accel_m/s2": 8.0,
+    "decel_m/s2": 20.0,
+    "base_pit_stop_time_s": 20.0,
+    "tyre_swap_time_s": 5.0,
+    "refuel_rate_l/s": 2.0,
+    "pit_exit_speed_m/s": 15.0,
+    "crawl_constant_m/s": 3.0,
+    "limp_constant_m/s": 3.0,
+    "fuel_capacity_l": 999999.0,
+    "start_speed_m/s": 0.0,
+    "crash_time_penalty_s": 30.0,
+    "crash_degradation": 0.1
+  },
+  "track": {
+    "total_laps": 50,
+    "segments": [
+      {"id": 1,  "type": "straight", "length_m": 600},
+      {"id": 2,  "type": "corner",   "length_m": 100, "radius_m": 30},
+      {"id": 3,  "type": "straight", "length_m": 300},
+      {"id": 4,  "type": "corner",   "length_m": 150, "radius_m": 80},
+      {"id": 5,  "type": "straight", "length_m": 200},
+      {"id": 6,  "type": "corner",   "length_m":  80, "radius_m": 20},
+      {"id": 7,  "type": "straight", "length_m": 400},
+      {"id": 8,  "type": "corner",   "length_m": 150, "radius_m": 120},
+      {"id": 9,  "type": "straight", "length_m": 300},
+      {"id": 10, "type": "corner",   "length_m": 100, "radius_m": 50},
+      {"id": 11, "type": "straight", "length_m": 250},
+      {"id": 12, "type": "corner",   "length_m": 100, "radius_m": 60},
+      {"id": 13, "type": "straight", "length_m": 200},
+      {"id": 14, "type": "corner",   "length_m": 120, "radius_m": 90},
+      {"id": 15, "type": "straight", "length_m": 500}
+    ]
+  },
+  "tyre_sets": [
+    {
+      "id": 1,
+      "compound": "soft",
+      "degradation_rate": 0.0,
+      "life_span": 9999999.0
+    }
+  ],
+  "weather": [],
+  "scoring": {
+    "time_reference_s": 4500.0
+  },
+  "initial_fuel_l": 999999.0
+}

@@ -104,15 +104,17 @@ def simulate_race(config: RaceConfig, strategy: Strategy) -> SimResult:
                 is_limp = True
 
             if seg.seg_type == "straight":
-                # Find next corner to determine required exit speed
+                # Find next corner to determine required exit speed.
+                # Wrap around to the start of segments (lap is a loop).
                 seg_pos = segments.index(seg)
                 next_corner: Optional[Segment] = None
-                for ns in segments[seg_pos + 1:]:
-                    if ns.seg_type == "corner":
-                        next_corner = ns
+                search_indices = list(range(seg_pos + 1, len(segments))) + list(range(0, seg_pos))
+                for ns_idx in search_indices:
+                    if segments[ns_idx].seg_type == "corner":
+                        next_corner = segments[ns_idx]
                         break
-                # If no next corner found (end of lap), exit freely
                 if next_corner is None:
+                    # Pure straight-only track — no braking needed
                     exit_required = 999.0
                 else:
                     exit_required = calc_max_corner_speed(
@@ -206,7 +208,7 @@ def simulate_race(config: RaceConfig, strategy: Strategy) -> SimResult:
 
             if refuel > 0:
                 fuel = min(fuel + refuel, car.fuel_capacity)
-                total_fuel_used -= refuel  # refuelling doesn't count as "used"
+                # NOTE: total_fuel_used tracks engine consumption only; refuelling does not reduce it.
 
             if new_tyre_id is not None:
                 current_tyre = _find_tyre(config.tyre_sets, new_tyre_id)

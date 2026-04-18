@@ -40,13 +40,16 @@ def _max_speed_before_corner(
     tyre: TyreSet,
     car_crawl: float,
 ) -> float:
-    """Upper-bound target speed: governed by the corner after this straight."""
+    """Max corner speed of the corner immediately after this straight (wraps lap)."""
     seg_pos = segments.index(seg)
-    for ns in segments[seg_pos + 1:]:
-        if ns.seg_type == "corner":
+    n = len(segments)
+    # Search forward, wrapping around to the start of the lap
+    search_order = list(range(seg_pos + 1, n)) + list(range(0, seg_pos))
+    for idx in search_order:
+        if segments[idx].seg_type == "corner":
             friction = calc_tyre_friction(tyre.base_friction, 0.0, 1.0)
-            return calc_max_corner_speed(ns.radius, friction, car_crawl)
-    return 200.0   # no corner after — open end of lap
+            return calc_max_corner_speed(segments[idx].radius, friction, car_crawl)
+    return 200.0   # pure straight-only track
 
 
 def _build_strategy(
@@ -63,12 +66,12 @@ def _build_strategy(
     total_laps = config.track.total_laps
 
     # x layout:
-    #   [0 .. n_straights)          speed_factor per straight (0..1)
-    #   [n_straights .. 2*n_str)    brake_factor per straight (0..1)
+    #   [0 .. n_straights)           target_speed per straight (absolute m/s)
+    #   [n_straights .. 2*n_str)     brake_start per straight (absolute metres)
     #   [2*n_str .. 2*n_str + n_pit) fuel per pit (only level 2+)
     n_str = n_straights
-    speed_factors = x[:n_str]
-    brake_factors = x[n_str: 2 * n_str]
+    target_speeds = x[:n_str]
+    brake_starts = x[n_str: 2 * n_str]
 
     # Fuel per pit stop
     n_pit = len(pit_laps)
@@ -85,16 +88,8 @@ def _build_strategy(
     for lap_idx in range(total_laps):
         straight_strats: List[StraightStrategy] = []
         for s_idx, seg in enumerate(straights):
-            sf = float(np.clip(speed_factors[s_idx], 0.0, 1.0))
-            bf = float(np.clip(brake_factors[s_idx], 0.0, 1.0))
-
-            # Upper speed bound for this straight
-            tyre = config.tyre_sets[stint_tyres[min(stint_idx, len(stint_tyres) - 1)]]
-            max_spd = _max_speed_before_corner(seg, segments, tyre, car.crawl_constant)
-            target_speed = sf * max_spd
-
-            # Brake start: fraction of segment length dedicated to braking
-            brake_start = bf * seg.length
+            target_speed = float(np.clip(target_speeds[s_idx], 0.0, 500.0))
+            brake_start = float(np.clip(brake_starts[s_idx], 0.0, seg.length))
 
             straight_strats.append(StraightStrategy(target_speed, brake_start))
 
@@ -142,13 +137,16 @@ def _build_bounds(
     config: RaceConfig,
     n_straights: int,
     n_pit: int,
+    segments: List[Segment],
 ) -> List[Tuple[float, float]]:
     """Build bounds for the DE parameter vector."""
+    straights = [s for s in segments if s.seg_type == "straight"]
     bounds = []
-    # speed_factor per straight: (0.3, 1.0) — don't go too slow
-    bounds += [(0.3, 1.0)] * n_straights
-    # brake_factor per straight: (0.05, 0.9) — fraction of straight used for braking
-    bounds += [(0.05, 0.9)] * n_straights
+    # target_speed per straight: absolute m/s, allow up to 300 m/s (physics will cap)
+    bounds += [(5.0, 300.0)] * n_straights
+    # brake_start per straight: 0 to full segment length (simulator enforces minimum)
+    for seg in straights:
+        bounds.append((0.0, seg.length * 0.95))
     # fuel per pit stop
     if config.level >= 2:
         bounds += [(0.0, config.car.fuel_capacity)] * n_pit
@@ -187,8 +185,32 @@ def _choose_stint_tyres(config: RaceConfig, n_stints: int) -> List[int]:
     return result
 
 
+def _optimal_l1_strategy(config: RaceConfig) -> Strategy:
+    """Analytically optimal Level 1 strategy: max speed, minimum braking.
+
+    Setting target_speed=999 lets the simulator find the physics peak speed.
+    Setting brake_start=0 lets the simulator apply exactly the minimum braking
+    distance needed to reach corner speed safely.
+    """
+    segments = config.track.segments
+    straights = [s for s in segments if s.seg_type == "straight"]
+    tyre = config.tyre_sets[0] if config.tyre_sets else None
+    initial_tyre_id = tyre.id if tyre else 0
+
+    lap_strategies = []
+    for _ in range(config.track.total_laps):
+        strats = [StraightStrategy(target_speed=999.0, brake_start=0.0) for _ in straights]
+        lap_strategies.append(LapStrategy(straight_strategies=strats, pit_enter=False))
+
+    return Strategy(initial_tyre_id=initial_tyre_id, laps=lap_strategies)
+
+
 def optimize(config: RaceConfig, time_budget_s: float = 60.0) -> Strategy:
     """Run differential evolution and return the best Strategy found."""
+    # Level 1 has an analytical optimal solution — no search needed
+    if config.level == 1:
+        return _optimal_l1_strategy(config)
+
     segments = config.track.segments
     n_straights = sum(1 for s in segments if s.seg_type == "straight")
     total_laps = config.track.total_laps
@@ -202,7 +224,7 @@ def optimize(config: RaceConfig, time_budget_s: float = 60.0) -> Strategy:
         stint_tyres = _choose_stint_tyres(config, n_stops + 1)
         n_pit = len(pit_laps)
 
-        bounds = _build_bounds(config, n_straights, n_pit)
+        bounds = _build_bounds(config, n_straights, n_pit, segments)
 
         def obj(x):
             return _objective(x, config, n_straights, pit_laps, stint_tyres)
@@ -247,7 +269,7 @@ def _get_stop_range(config: RaceConfig) -> range:
 
 
 def _naive_strategy(config: RaceConfig) -> Strategy:
-    """Build a conservative strategy without optimization."""
+    """Build a conservative fallback strategy (no optimization)."""
     segments = config.track.segments
     straights = [s for s in segments if s.seg_type == "straight"]
     tyre = config.tyre_sets[0] if config.tyre_sets else None
@@ -257,6 +279,7 @@ def _naive_strategy(config: RaceConfig) -> Strategy:
     for _ in range(config.track.total_laps):
         strats = []
         for seg in straights:
+            # Use 80% of the corner max speed as target (wrap-around aware)
             max_spd = _max_speed_before_corner(
                 seg, segments, tyre, config.car.crawl_constant
             ) if tyre else 50.0
